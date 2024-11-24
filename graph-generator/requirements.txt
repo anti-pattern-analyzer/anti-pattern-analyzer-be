@@ -1,1 +1,2 @@
 # Python dependencies
+fastapi~=0.115.5
