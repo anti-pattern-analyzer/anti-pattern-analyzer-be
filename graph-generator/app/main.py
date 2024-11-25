@@ -1,10 +1,20 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import db_manager
 from app.core.scheduler import start_scheduler, stop_scheduler
 from app.routers import traces_router, graphs_router
 
 app = FastAPI(title="Graph Generator")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include API routers
 app.include_router(traces_router, prefix="/api/traces", tags=["Traces"])

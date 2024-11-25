@@ -11,6 +11,7 @@ class DatabaseManager:
         self.mongo_client = None
         self.trace_collection = None
         self.trace_updates = None
+        self.trace_collection_updates = None
 
         # Neo4j driver
         self.neo4j_driver = None
@@ -30,10 +31,13 @@ class DatabaseManager:
                 db.create_collection("traces")
             if "trace_updates" not in db.list_collection_names():
                 db.create_collection("trace_updates")
+            if "trace_collection_updates" not in db.list_collection_names():
+                db.create_collection("trace_collection_updates")
 
             # Assign collections
             self.trace_collection = db["traces"]
             self.trace_updates = db["trace_updates"]
+            self.trace_collection_updates = db["trace_collection_updates"]
 
             print(f"MongoDB connected successfully. Collections initialized: "
                   f"trace_collection={self.trace_collection}, trace_updates={self.trace_updates}")
@@ -92,6 +96,14 @@ class DatabaseManager:
         if self.trace_updates is None:
             raise RuntimeError("MongoDB 'trace_updates' collection is not initialized.")
         return self.trace_updates
+
+    def get_trace_collection_updates_collection(self):
+        """"
+        Get MongoDB 'trace_collection_updates' collection
+        """
+        if self.trace_collection_updates is None:
+            raise RuntimeError("MongoDB 'trace_collection_updates' collection is not initialized.")
+        return self.trace_collection_updates
 
 
 # Instantiate a global DatabaseManager

@@ -168,3 +168,32 @@ def fetch_and_store_traces_for_all_services():
         total_traces = fetch_and_store_traces(service)
         if total_traces == 0:
             print(f"No new traces for service: {service}. Moving to the next service.")
+
+
+def get_all_the_traces(batch_size=100):
+    """
+    Retrieve all traces from the MongoDB traces collection.
+    Args:
+        batch_size (int): Number of traces to fetch per batch to avoid memory issues.
+    Returns:
+        list: List of all trace documents in the database.
+    """
+    print("Trying to retrieve the traces")
+    try:
+        traces_collection = db_manager.get_trace_collection()
+        all_traces = []
+        skip_count = 0
+
+        # Use a loop to fetch in batches
+        while True:
+            batch = list(traces_collection.find({}, {"_id": 0}).skip(skip_count).limit(batch_size))
+            if not batch:
+                break  # Exit when no more documents are found
+            all_traces.extend(batch)
+            skip_count += batch_size
+
+        print(f"Retrieved {len(all_traces)} traces from the database.")
+        return all_traces
+    except Exception as e:
+        print(f"Error fetching traces: {e}")
+        return None
