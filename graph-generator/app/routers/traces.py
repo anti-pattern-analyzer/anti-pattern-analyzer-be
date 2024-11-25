@@ -1,17 +1,22 @@
-from fastapi import APIRouter
-
-from app.services import fetch_services, fetch_and_store_traces_for_all_services
+from fastapi import APIRouter, HTTPException
+from app.services.graph_processor import get_graph_data_as_json
 
 router = APIRouter()
 
 
-@router.get("/services")
-async def get_all_services():
-    services = fetch_services()
-    return {"status": "success", "data": services}
+@router.post("/create")
+async def create_dependency_graph():
+    try:
+        update_dependency_graph()
+        return {"status": "success", "message": "Dependency graph updated successfully."}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to update graph: {str(e)}"}
 
 
-@router.get("")
-async def get_all_traces():
-    services = fetch_and_store_traces_for_all_services()
-    return {"status": "success", "data": services}
+@router.get("/")
+async def retrieve_dependency_graph():
+    try:
+        graph_data = get_graph_data_as_json()
+        return {"status": "success", "graph": graph_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve graph: {str(e)}")
