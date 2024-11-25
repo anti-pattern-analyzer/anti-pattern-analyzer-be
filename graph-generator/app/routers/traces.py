@@ -1,9 +1,17 @@
 from fastapi import APIRouter
-from app.services.data_collector import fetch_and_store_traces
+
+from app.services import fetch_services, fetch_and_store_traces_for_all_services
 
 router = APIRouter()
 
-@router.post("/{service_name}")
-async def collect_traces(service_name: str):
-    traces = fetch_and_store_traces(service_name)
-    return {"status": "success", "traces_collected": len(traces)}
+
+@router.get("/services")
+async def get_all_services():
+    services = fetch_services()
+    return {"status": "success", "data": services}
+
+
+@router.get("")
+async def get_all_traces():
+    services = fetch_and_store_traces_for_all_services()
+    return {"status": "success", "data": services}

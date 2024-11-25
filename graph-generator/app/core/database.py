@@ -1,53 +1,98 @@
+import certifi
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure, CollectionInvalid
 from neo4j import GraphDatabase
 from app.core.config import settings
 
-mongo_client = None
-trace_collection = None
-neo4j_driver = None
+
+class DatabaseManager:
+    def __init__(self):
+        # MongoDB variables
+        self.mongo_client = None
+        self.trace_collection = None
+        self.trace_updates = None
+
+        # Neo4j driver
+        self.neo4j_driver = None
+
+    async def initialize_mongo(self):
+        """
+        Initialize MongoDB connection and collections.
+        """
+        try:
+            # Connect to MongoDB
+            self.mongo_client = MongoClient(settings.MONGO_URI, tlsCAFile=certifi.where())
+            self.mongo_client.admin.command("ping")
+            db = self.mongo_client[settings.MONGO_DB]
+
+            # Explicitly check or create collections
+            if "traces" not in db.list_collection_names():
+                db.create_collection("traces")
+            if "trace_updates" not in db.list_collection_names():
+                db.create_collection("trace_updates")
+
+            # Assign collections
+            self.trace_collection = db["traces"]
+            self.trace_updates = db["trace_updates"]
+
+            print(f"MongoDB connected successfully. Collections initialized: "
+                  f"trace_collection={self.trace_collection}, trace_updates={self.trace_updates}")
+        except ConnectionFailure as e:
+            print(f"MongoDB connection failed: {e}")
+            raise e
+
+    async def close_mongo(self):
+        """
+        Close MongoDB connection.
+        """
+        if self.mongo_client is not None:
+            self.mongo_client.close()
+            print("MongoDB connection closed.")
+        else:
+            print("MongoDB client was not initialized.")
+
+    def initialize_neo4j(self):
+        """
+        Initialize Neo4j connection.
+        """
+        try:
+            # Connect to Neo4j
+            self.neo4j_driver = GraphDatabase.driver(
+                settings.NEO4J_URI,
+                auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+            )
+            self.neo4j_driver.verify_connectivity()
+            print("Neo4j connected successfully.")
+        except Exception as e:
+            print(f"Neo4j connection failed: {e}")
+            raise e
+
+    def close_neo4j(self):
+        """
+        Close Neo4j connection.
+        """
+        if self.neo4j_driver is not None:
+            self.neo4j_driver.close()
+            print("Neo4j connection closed.")
+        else:
+            print("Neo4j driver was not initialized.")
+
+    def get_trace_collection(self):
+        """
+        Get MongoDB 'traces' collection.
+        """
+        if self.trace_collection is None:
+            raise RuntimeError("MongoDB 'traces' collection is not initialized.")
+        return self.trace_collection
+
+    def get_trace_updates_collection(self):
+        """
+        Get MongoDB 'trace_updates' collection.
+        """
+        if self.trace_updates is None:
+            raise RuntimeError("MongoDB 'trace_updates' collection is not initialized.")
+        return self.trace_updates
 
 
-async def initialize_mongo():
-    global mongo_client, trace_collection
-    try:
-        mongo_client = MongoClient(settings.MONGO_URI)
-        mongo_client.admin.command("ping")
-        trace_collection = mongo_client[settings.MONGO_DB]["traces"]
-        print("MongoDB connected successfully.")
-    except ConnectionFailure as e:
-        print(f"MongoDB connection failed: {e}")
-        raise e
-
-
-async def close_mongo():
-    global mongo_client
-    if mongo_client is not None:
-        mongo_client.close()
-        print("MongoDB connection closed.")
-    else:
-        print("MongoDB client was not initialized.")
-
-
-def initialize_neo4j():
-    global neo4j_driver
-    try:
-        neo4j_driver = GraphDatabase.driver(
-            settings.NEO4J_URI,
-            auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
-        )
-        with neo4j_driver.session() as session:
-            session.run("RETURN 1")
-        print("Neo4j connected successfully.")
-    except Exception as e:
-        print(f"Neo4j connection failed: {e}")
-        raise e
-
-
-def close_neo4j():
-    global neo4j_driver
-    if neo4j_driver is not None:
-        neo4j_driver.close()
-        print("Neo4j connection closed.")
-    else:
-        print("Neo4j driver was not initialized.")
+# Instantiate a global DatabaseManager
+db_manager = DatabaseManager()

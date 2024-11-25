@@ -1,17 +1,164 @@
 import requests
-from app.core.database import trace_collection
+from datetime import datetime, timezone, timedelta
+from pymongo import errors
+from app.core.database import db_manager
+
+JAEGER_BASE_URL = "http://localhost:16686/api"
 
 
-def fetch_traces(service_name: str):
-    url = f"http://localhost:16686/api/traces?service={service_name}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json().get("data", [])
-    return []
+def setup_indexes():
+    """
+    Ensure the required indexes are set up on the collections.
+    """
+    try:
+        trace_collection = db_manager.get_trace_collection()
+        trace_collection.create_index("traceID", unique=True)  # Enforce unique traceIDs
+        trace_updates = db_manager.get_trace_updates_collection()
+        trace_updates.create_index("service_name", unique=True)  # Enforce unique services
+        print("Indexes created successfully.")
+    except errors.PyMongoError as e:
+        print(f"Error setting up indexes: {e}")
 
 
-def fetch_and_store_traces(service_name: str):
-    traces = fetch_traces(service_name)
-    for trace in traces:
-        trace_collection.insert_one(trace)
-    return traces
+def fetch_services():
+    """
+    Fetch all available services from Jaeger.
+    Returns:
+        List of service names.
+    """
+    url = f"{JAEGER_BASE_URL}/services"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        services = response.json().get("data", [])
+        return sorted([service for service in services if service != "jaeger-all-in-one"])
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch services: {e}")
+        return []
+
+
+def fetch_traces(service_name, start_us, end_us, limit=100):
+    """
+    Fetch traces for a specific service within a time range.
+    """
+    url = f"{JAEGER_BASE_URL}/traces"
+    params = {
+        "service": service_name,
+        "start": int(start_us),  # Ensure integer timestamps
+        "end": int(end_us),      # Ensure integer timestamps
+        "limit": limit,
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        if not isinstance(data, list):
+            print(f"Unexpected API response for {service_name}: {data}")
+            return []
+        return data
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch traces for service '{service_name}': {e}")
+        return []
+
+
+def initialize_trace_updates(services):
+    """
+    Ensure every service has an entry in the trace_updates collection.
+    """
+    try:
+        trace_updates = db_manager.get_trace_updates_collection()
+        if trace_updates is None:
+            raise RuntimeError("trace_updates collection is not initialized.")
+
+        for service in services:
+            trace_updates.update_one(
+                {"service_name": service},
+                {"$setOnInsert": {
+                    "last_fetched_end_time_us": None
+                }},
+                upsert=True
+            )
+    except RuntimeError as e:
+        print(f"Failed to initialize trace updates: {e}")
+
+
+def fetch_and_store_traces(service_name):
+    """
+    Fetch and store traces for a specific service, handling sparse data.
+    """
+    try:
+        trace_collection = db_manager.get_trace_collection()
+        trace_updates = db_manager.get_trace_updates_collection()
+
+        # Retrieve last fetched end time in microseconds
+        update_record = trace_updates.find_one({"service_name": service_name})
+        last_end_time_us = update_record.get("last_fetched_end_time_us", None)
+
+        # Default: Start from the last 7 days if no records exist
+        if last_end_time_us is None:
+            last_end_time_us = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1e6)
+
+        current_time_us = int(datetime.now(timezone.utc).timestamp() * 1e6)
+        total_stored = 0
+        consecutive_no_trace_batches = 0  # Counter for consecutive empty batches
+
+        while last_end_time_us < current_time_us:
+            next_end_time_us = min(last_end_time_us + (5 * 60 * 1e6), current_time_us)  # 5-minute batch
+            traces = fetch_traces(service_name, start_us=last_end_time_us, end_us=next_end_time_us)
+
+            if not traces:
+                # If no traces are found, expand the range instead of stopping immediately
+                consecutive_no_trace_batches += 1
+                print(f"No traces found for {service_name} in range {last_end_time_us} - {next_end_time_us}.")
+                if consecutive_no_trace_batches > 10:  # Allow 10 consecutive empty batches before stopping
+                    print(f"Stopping early for {service_name}, no traces found in 10 consecutive ranges.")
+                    break
+                last_end_time_us = next_end_time_us + 1  # Move to the next range
+                continue
+
+            # Reset empty batch counter upon finding data
+            consecutive_no_trace_batches = 0
+            valid_traces = [trace for trace in traces if "traceID" in trace]
+
+            if valid_traces:
+                try:
+                    trace_collection.insert_many(valid_traces, ordered=False)
+                    total_stored += len(valid_traces)
+                except errors.BulkWriteError as bwe:
+                    duplicate_count = len(bwe.details.get("writeErrors", []))
+                    print(f"{duplicate_count} duplicate traces ignored for {service_name}.")
+
+            # Update last_end_time_us for the next batch
+            last_end_time_us = next_end_time_us + 1
+
+            # Update progress in the trace_updates collection
+            trace_updates.update_one(
+                {"service_name": service_name},
+                {"$set": {"last_fetched_end_time_us": last_end_time_us}}
+            )
+
+        print(f"Stored {total_stored} unique traces for service: {service_name}.")
+        return total_stored
+    except Exception as e:
+        print(f"Error fetching and storing traces for {service_name}: {e}")
+        return 0
+
+
+def fetch_and_store_traces_for_all_services():
+    """
+    Fetch and store traces for all services, updating the trace_updates collection.
+    """
+    services = fetch_services()
+    if not services:
+        print("No services available.")
+        return
+
+    # Initialize the trace_updates collection
+    initialize_trace_updates(services)
+
+    for service in services:
+        print(f"Processing service: {service}")
+        total_traces = fetch_and_store_traces(service)
+        if total_traces == 0:
+            print(f"No new traces for service: {service}. Moving to the next service.")
