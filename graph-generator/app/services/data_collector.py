@@ -85,7 +85,7 @@ def initialize_trace_updates(services):
 
 def fetch_and_store_traces(service_name):
     """
-    Fetch and store traces for a specific service, handling sparse data.
+    Fetch and store traces for a specific service, handling sparse data and deduplication.
     """
     try:
         trace_collection = db_manager.get_trace_collection()
@@ -95,12 +95,13 @@ def fetch_and_store_traces(service_name):
         update_record = trace_updates.find_one({"service_name": service_name})
         last_end_time_us = update_record.get("last_fetched_end_time_us", None)
 
-        # Default: Start from the last 7 days if no records exist
+        # Default: Start from the last 5 minutes if no records exist
         if last_end_time_us is None:
-            last_end_time_us = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1e6)
+            last_end_time_us = int((datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp() * 1e6)
 
         current_time_us = int(datetime.now(timezone.utc).timestamp() * 1e6)
         total_stored = 0
+        total_skipped = 0
         consecutive_no_trace_batches = 0  # Counter for consecutive empty batches
 
         while last_end_time_us < current_time_us:
@@ -108,26 +109,28 @@ def fetch_and_store_traces(service_name):
             traces = fetch_traces(service_name, start_us=last_end_time_us, end_us=next_end_time_us)
 
             if not traces:
-                # If no traces are found, expand the range instead of stopping immediately
                 consecutive_no_trace_batches += 1
-                print(f"No traces found for {service_name} in range {last_end_time_us} - {next_end_time_us}.")
+                print(f"No traces found for {service_name} in range {int(last_end_time_us)} - {int(next_end_time_us)}")
                 if consecutive_no_trace_batches > 10:  # Allow 10 consecutive empty batches before stopping
                     print(f"Stopping early for {service_name}, no traces found in 10 consecutive ranges.")
                     break
-                last_end_time_us = next_end_time_us + 1  # Move to the next range
+                last_end_time_us = next_end_time_us + 1
                 continue
 
-            # Reset empty batch counter upon finding data
-            consecutive_no_trace_batches = 0
-            valid_traces = [trace for trace in traces if "traceID" in trace]
-
-            if valid_traces:
-                try:
-                    trace_collection.insert_many(valid_traces, ordered=False)
-                    total_stored += len(valid_traces)
-                except errors.BulkWriteError as bwe:
-                    duplicate_count = len(bwe.details.get("writeErrors", []))
-                    print(f"{duplicate_count} duplicate traces ignored for {service_name}.")
+            consecutive_no_trace_batches = 0  # Reset counter upon finding data
+            for trace in traces:
+                if "traceID" in trace:
+                    try:
+                        # Use upsert to avoid duplicates
+                        result = trace_collection.update_one(
+                            {"traceID": trace["traceID"]}, {"$set": trace}, upsert=True
+                        )
+                        if result.upserted_id:
+                            total_stored += 1  # Trace inserted
+                        else:
+                            total_skipped += 1  # Trace already exists
+                    except errors.PyMongoError as e:
+                        print(f"Error inserting/updating trace {trace['traceID']} for {service_name}: {e}")
 
             # Update last_end_time_us for the next batch
             last_end_time_us = next_end_time_us + 1
@@ -138,7 +141,10 @@ def fetch_and_store_traces(service_name):
                 {"$set": {"last_fetched_end_time_us": last_end_time_us}}
             )
 
-        print(f"Stored {total_stored} unique traces for service: {service_name}.")
+        print(
+            f"Processed {total_stored + total_skipped} traces for service: {service_name}. "
+            f"Inserted: {total_stored}, Skipped (duplicates): {total_skipped}."
+        )
         return total_stored
     except Exception as e:
         print(f"Error fetching and storing traces for {service_name}: {e}")
