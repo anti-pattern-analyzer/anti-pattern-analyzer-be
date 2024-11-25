@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+
+from app.core.database import db_manager
+from app.core.scheduler import start_scheduler, stop_scheduler
 from app.routers import traces_router, graphs_router
 
 app = FastAPI(title="Graph Generator")
@@ -11,11 +14,17 @@ app.include_router(graphs_router, prefix="/api/graphs", tags=["Graphs"])
 @app.on_event("startup")
 async def startup():
     print("Starting up: Initializing database connection...")
+    await db_manager.initialize_mongo()
+    db_manager.initialize_neo4j()
+    start_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown():
     print("Shutting down: Closing database connection...")
+    await db_manager.close_mongo()
+    db_manager.close_neo4j()
+    stop_scheduler()
 
 
 @app.get("/")

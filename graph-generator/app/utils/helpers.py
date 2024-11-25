@@ -1,6 +1,6 @@
 def format_timestamp(timestamp):
-    from datetime import datetime
-    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def calculate_weights(interaction_data):
