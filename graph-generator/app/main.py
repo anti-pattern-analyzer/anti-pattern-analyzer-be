@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import db_manager
 from app.core.scheduler import start_scheduler, stop_scheduler
-from app.routers import traces_router, graphs_router
+from app.routers import traces_router, graphs_router, services_router
 
 app = FastAPI(title="Graph Generator")
 
@@ -19,6 +19,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(traces_router, prefix="/api/traces", tags=["Traces"])
 app.include_router(graphs_router, prefix="/api/graphs", tags=["Graphs"])
+app.include_router(services_router, prefix="/api/services", tags=["Graphs"])
 
 
 @app.on_event("startup")
