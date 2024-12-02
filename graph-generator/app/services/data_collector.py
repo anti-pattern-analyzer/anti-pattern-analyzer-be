@@ -2,8 +2,9 @@ import requests
 from datetime import datetime, timezone, timedelta
 from pymongo import errors
 from app.core.database import db_manager
+from app.core.config import settings
 
-JAEGER_BASE_URL = "http://localhost:16686/api"
+JAEGER_BASE_URL = settings.JAEGER_URL
 
 
 def setup_indexes():

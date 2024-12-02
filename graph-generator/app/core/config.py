@@ -17,5 +17,7 @@ class Settings:
     NEO4J_USER: str = os.getenv("NEO4J_USER")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
 
+    JAEGER_URL: str = os.getenv("JAEGER_URL")
+
 
 settings = Settings()
