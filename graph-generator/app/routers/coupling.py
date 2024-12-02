@@ -27,10 +27,9 @@ async def get_absolute_importance_of_a_service(service: Optional[str] = Query(No
 @router.get("/")
 async def coupling_health():
     """
-    Endpoint to fetch the dependency graph as JSON data.
+    Endpoint to check the health of the coupling module.
     """
     try:
-        graph_data = get_graph_data_as_json()
-        return {"status": "success", "graph": graph_data}
+        return {"status": "success", "message": "Coupling module is healthy."}
     except Exception as e:
         return {"status": "error", "message": f"Failed to fetch graph: {str(e)}"}
