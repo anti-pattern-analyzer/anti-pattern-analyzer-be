@@ -1,3 +1,7 @@
+from collections import defaultdict
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
 import networkx as nx
 from networkx.readwrite import json_graph
 from app.core.database import db_manager
@@ -244,3 +248,66 @@ def get_anti_patterns_using_graph_data(graph_data):
         })
 
     return anti_patterns
+
+
+def normalize_path(http_url):
+    """
+    Normalize the path from a full HTTP URL or relative path.
+
+    Args:
+        http_url (str): The HTTP URL or relative path.
+
+    Returns:
+        str: The normalized relative path.
+    """
+    try:
+        parsed_url = urlparse(http_url)
+        return parsed_url.path  # Extract only the path portion
+    except Exception as e:
+        print(f"Error normalizing path: {e}")
+        return http_url  # Return the original if parsing fails
+
+
+def analyze_endpoint_usage(traces: list):
+    """
+    Analyze endpoint usage from trace data.
+
+    Args:
+        traces (list): List of trace data.
+
+    Returns:
+        dict: Endpoint usage data including request counts and last accessed times.
+    """
+    endpoint_usage = defaultdict(lambda: {"request_count": 0, "last_accessed": None})
+
+    for trace in traces:
+        spans = trace.get("spans", [])
+        for span in spans:
+            # Extract endpoint and method information from span tags
+            tags = {tag["key"]: tag["value"] for tag in span.get("tags", [])}
+            http_method = tags.get("method")
+            http_url = tags.get("http.url") or tags.get("uri")
+            start_time = span.get("startTime")
+
+            if http_url and http_method and start_time:
+                # Normalize the endpoint path
+                normalized_path = normalize_path(http_url)
+                endpoint_key = f"{http_method} {normalized_path}"
+
+                # Update request count and last accessed
+                endpoint_usage[endpoint_key]["request_count"] += 1
+                if (
+                        endpoint_usage[endpoint_key]["last_accessed"] is None
+                        or start_time > endpoint_usage[endpoint_key]["last_accessed"]
+                ):
+                    endpoint_usage[endpoint_key]["last_accessed"] = start_time
+
+    # Convert startTime (epoch in microseconds) to human-readable datetime
+    for endpoint in endpoint_usage:
+        last_accessed = endpoint_usage[endpoint]["last_accessed"]
+        if last_accessed:
+            endpoint_usage[endpoint]["last_accessed"] = datetime.fromtimestamp(
+                last_accessed / 1e6, timezone.utc
+            ).isoformat()
+
+    return endpoint_usage

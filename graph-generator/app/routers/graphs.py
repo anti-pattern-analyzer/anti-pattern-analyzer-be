@@ -1,8 +1,10 @@
 from fastapi import APIRouter
+
+from app.services import get_all_traces_from_mongo
 from app.services.graph_processor import (
     generate_weighted_graph_from_traces,
     update_graph_in_neo4j,
-    get_graph_data_as_json, get_anti_patterns_using_graph_data
+    get_graph_data_as_json, get_anti_patterns_using_graph_data, analyze_endpoint_usage
 )
 from app.services.graph_updater import fetch_new_traces_since_last_sync, update_last_sync_date
 
@@ -51,5 +53,15 @@ async def fetch_dependency_graph_patterns():
         graph_data = get_graph_data_as_json()
         patterns = get_anti_patterns_using_graph_data(graph_data)
         return {"status": "success", "patterns": patterns}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to fetch graph: {str(e)}"}
+
+
+@router.get("/endpoint/usage")
+async def fetch_dependency_graph_patterns():
+    try:
+        traces = get_all_traces_from_mongo()
+        endpoints = analyze_endpoint_usage(traces)
+        return {"status": "success", "endpoints": endpoints}
     except Exception as e:
         return {"status": "error", "message": f"Failed to fetch graph: {str(e)}"}
