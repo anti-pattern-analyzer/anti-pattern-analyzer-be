@@ -11,7 +11,7 @@ async def get_traces():
     return {"status": "success", "traces": traces}
 
 
-@router.get("services/{service}")
+@router.get("/services/{service}")
 async def get_trace(service: str):
     traces = get_traces_by_parent_service(service)
     return {"status": "success", "traces": traces}
